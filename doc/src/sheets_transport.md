@@ -15,9 +15,9 @@ Concrete `Transport` implementation backed by a Google Spreadsheet, one tab per 
 
 | Row | Content                                                              |
 |-----|----------------------------------------------------------------------|
-| 1   | Labels: A1=`Prompt:` (bold), B1=`Send` (bold), H1=`session_id=<id>` |
+| 1   | Labels: A1=`Prompt:` (bold), B1=`Send` (bold), C1=`Context:` (bold), D1=percentage, H1=`session_id=<id>` |
 | 2   | Input: A2=[user prompt, yellow bg, thick border], B2=[send checkbox] |
-| 3   | Header row: `Text | Role | Status | Timestamp` (bold)               |
+| 3   | Header row: `Text | Role | Status | Timestamp | Tokens` (bold)      |
 | 4+  | Data rows (newest first)                                             |
 
 ### Column layout (data rows)
@@ -28,6 +28,7 @@ Concrete `Transport` implementation backed by a Google Spreadsheet, one tab per 
 | B (2)  | `role`      | `user`, `claude`, or `error`.                            |
 | C (3)  | `status`    | `processing` or `done`.                                  |
 | D (4)  | `timestamp` | UTC timestamp in `YYYY-MM-DD HH:MM:SS UTC` format.      |
+| E (5)  | `tokens`    | Token usage as `input / output` (on claude rows).        |
 
 ### Row colors
 
@@ -75,7 +76,7 @@ Authentication uses `google.oauth2.service_account.Credentials` with the `spread
 
 ### Response handling
 
-- `respond` — inserts a `claude` row at row 4 (pushing the user row to row 5), marks the user row as `done`, writes the `session_id` to H1.
+- `respond` — inserts a `claude` row at row 4 (pushing the user row to row 5), marks the user row as `done`, writes the `session_id` to H1, and updates the context usage percentage in D1.
 - `report_error` — inserts an `error` row at row 4, marks the user row as `done`.
 - `update_status` — overwrites row A1 of the status tab with a timestamped key=value heartbeat. Creates the status tab if it doesn't exist.
 
@@ -83,6 +84,6 @@ Authentication uses `google.oauth2.service_account.Credentials` with the `spread
 
 When a new or empty tab is detected, it is set up with:
 
-- Row 1: bold labels ("Prompt:", "Send").
+- Row 1: bold labels ("Prompt:", "Send", "Context:").
 - Row 2: yellow-background input cell (A2) with a thick border, boolean checkbox validation on B2.
-- Row 3: bold column headers ("Text", "Role", "Status", "Timestamp").
+- Row 3: bold column headers ("Text", "Role", "Status", "Timestamp", "Tokens").

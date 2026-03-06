@@ -26,7 +26,14 @@ class Transport(ABC):
         """Return the next unanswered user prompt, or None."""
 
     @abstractmethod
-    def respond(self, conversation_name: str, text: str, session_id: str) -> None:
+    def respond(
+        self,
+        conversation_name: str,
+        text: str,
+        session_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> None:
         """Append the assistant response and persist the session_id."""
 
     @abstractmethod

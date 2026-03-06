@@ -84,7 +84,13 @@ class Orchestrator:
             logger.error("CC error in [%s]: %s", message.conversation_name, response.error)
             self._transport.report_error(message.conversation_name, response.error or "unknown error")
         else:
-            self._transport.respond(message.conversation_name, response.text, response.session_id)
+            self._transport.respond(
+                message.conversation_name,
+                response.text,
+                response.session_id,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+            )
             logger.info(
                 "Responded in [%s] (tokens in=%d out=%d)",
                 message.conversation_name,

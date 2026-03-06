@@ -11,7 +11,7 @@ Each conversation is identified by name. The transport is responsible for storin
 | Method         | Signature                                                        | Description                                          |
 |----------------|------------------------------------------------------------------|------------------------------------------------------|
 | `poll`         | `() -> Optional[Message]`                                        | Return the next unanswered user prompt, or `None`.   |
-| `respond`      | `(conversation_name: str, text: str, session_id: str) -> None`   | Append the assistant response and persist the session ID. |
+| `respond`      | `(conversation_name: str, text: str, session_id: str, input_tokens: int = 0, output_tokens: int = 0) -> None` | Append the assistant response and persist the session ID. |
 | `report_error` | `(conversation_name: str, error_text: str) -> None`              | Append an error message to the conversation.         |
 | `update_status`| `(status: dict) -> None`                                        | Publish a status/heartbeat dictionary.               |
 

@@ -30,9 +30,9 @@ _SCOPES = [
 _STATUS_TAB = "status"
 
 # Conversation tab layout:
-#   Row 1: A1="Prompt:" (label)  B1="Send" (label)  H1=session_id
+#   Row 1: A1="Prompt:" B1="Send" C1="Context:" D1=<percentage>  H1=session_id
 #   Row 2: A2=[user input, yellow bg, thick border]  B2=[send checkbox]
-#   Row 3: header row (Text | Role | Status | Timestamp) (bold)
+#   Row 3: header row (Text | Role | Status | Timestamp | Tokens) (bold)
 #   Row 4+: data rows, newest first (inserted at row 4, pushing older rows down)
 
 _ROW_LABEL = 1
@@ -44,7 +44,13 @@ _COL_TEXT = 1       # A (also the prompt input on _ROW_INPUT)
 _COL_ROLE = 2       # B (also the send checkbox on _ROW_INPUT)
 _COL_STATUS = 3     # C
 _COL_TIMESTAMP = 4  # D
+_COL_TOKENS = 5     # E
 _COL_SESSION_ID = 8  # H (only on _ROW_LABEL, out of the way)
+
+_COL_CONTEXT_LABEL = 3  # C (on _ROW_LABEL)
+_COL_CONTEXT_VALUE = 4  # D (on _ROW_LABEL)
+
+_CONTEXT_WINDOW_TOKENS = 200_000
 
 # Background colors per role (RGB 0-1 scale for Google Sheets API).
 _ROLE_COLORS = {
@@ -146,7 +152,7 @@ class SheetsTransport(Transport):
                         value_input_option="RAW",
                     )
                     worksheet.format(
-                        f"A{_ROW_DATA_START}:D{_ROW_DATA_START}",
+                        f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
                         {"backgroundColor": _ROLE_COLORS["user"]},
                     )
 
@@ -198,24 +204,37 @@ class SheetsTransport(Transport):
 
         return None
 
-    def respond(self, conversation_name: str, text: str, session_id: str) -> None:
+    def respond(
+        self,
+        conversation_name: str,
+        text: str,
+        session_id: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> None:
         """Insert the assistant response at the top of the log."""
         worksheet = self._spreadsheet.worksheet(conversation_name)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        tokens_cell = f"{input_tokens} / {output_tokens}" if input_tokens or output_tokens else ""
 
         # Insert response row at top of log (pushes user row from 4 to 5).
         worksheet.insert_rows(
-            [[text, "claude", "done", timestamp]],
+            [[text, "claude", "done", timestamp, tokens_cell]],
             row=_ROW_DATA_START,
             value_input_option="RAW",
         )
         worksheet.format(
-            f"A{_ROW_DATA_START}:D{_ROW_DATA_START}",
+            f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
             {"backgroundColor": _ROLE_COLORS["claude"]},
         )
 
         # Mark the user row (now shifted to row 5) as done.
         worksheet.update_cell(_ROW_DATA_START + 1, _COL_STATUS, "done")
+
+        # Update context usage percentage on the label row.
+        if input_tokens:
+            percentage = min(round(input_tokens / _CONTEXT_WINDOW_TOKENS * 100), 100)
+            worksheet.update_cell(_ROW_LABEL, _COL_CONTEXT_VALUE, f"{percentage}%")
 
         self._write_session_id(worksheet, session_id)
         self._processing_tabs.discard(conversation_name)
@@ -232,7 +251,7 @@ class SheetsTransport(Transport):
             value_input_option="RAW",
         )
         worksheet.format(
-            f"A{_ROW_DATA_START}:D{_ROW_DATA_START}",
+            f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
             {"backgroundColor": _ROLE_COLORS["error"]},
         )
 
@@ -263,9 +282,9 @@ class SheetsTransport(Transport):
         worksheet.update(
             "A1",
             [
-                ["Prompt:", "Send"],
+                ["Prompt:", "Send", "Context:", ""],
                 [],
-                ["Text", "Role", "Status", "Timestamp"],
+                ["Text", "Role", "Status", "Timestamp", "Tokens"],
             ],
             value_input_option="RAW",
         )
@@ -315,8 +334,8 @@ class SheetsTransport(Transport):
 
         # Yellow background for input cell (A2), bold on labels (row 1) and headers (row 3).
         worksheet.format("A2", {"backgroundColor": _INPUT_COLOR})
-        worksheet.format("A1:B1", {"textFormat": {"bold": True}})
-        worksheet.format("A3:D3", {"textFormat": {"bold": True}})
+        worksheet.format("A1:D1", {"textFormat": {"bold": True}})
+        worksheet.format("A3:E3", {"textFormat": {"bold": True}})
 
         # Mark as active so it gets polled frequently right away.
         self._active_tabs[worksheet.title] = time.monotonic()
