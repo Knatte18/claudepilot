@@ -1,0 +1,17 @@
+# Google Sheets transport configuration
+google_sheets:
+  # Path to the service account JSON key file
+  service_account_key_file: credentials/service_account.json
+  # Google Sheets spreadsheet ID (from the sheet URL)
+  spreadsheet_id: YOUR_SPREADSHEET_ID_HERE
+  # Name of the tab where status/heartbeat is written (auto-created if missing)
+  status_tab: status
+
+# Claude Code CLI configuration
+claude_code:
+  # Path to the claude executable (use full path if not on PATH)
+  executable: claude
+  # How often to poll the sheet for new commands (seconds)
+  polling_interval_seconds: 10
+  # Permission mode for unattended operation
+  permission_mode: bypassPermissions

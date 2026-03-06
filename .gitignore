@@ -1,0 +1,15 @@
+## Claude Code
+**/.llm/
+nul
+
+## Secrets
+credentials/
+config.yaml
+
+## Python
+*.pyc
+__pycache__/
+.venv/
+*.egg-info/
+dist/
+build/

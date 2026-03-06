@@ -1,0 +1,18 @@
+[project]
+name = "claudepilot"
+version = "0.1.0"
+description = "Remote control of Claude Code via Google Sheets"
+authors = [
+    {name = "hanf"}
+]
+requires-python = ">=3.11"
+dependencies = [
+    "gspread (>=6.2.1,<7.0.0)",
+    "google-auth (>=2.48.0,<3.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
