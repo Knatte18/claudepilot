@@ -1,3 +1,9 @@
+"""
+models.py — Shared data classes used across the ccpilot service.
+
+Defines Message (a user prompt read from a transport) and Response (the result
+returned by the Claude Code bridge after processing a prompt).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass

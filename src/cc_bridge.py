@@ -1,3 +1,11 @@
+"""
+cc_bridge.py — Subprocess bridge to the Claude Code CLI.
+
+ClaudeCodeBridge wraps the `claude` CLI, invoking it as a short-lived
+subprocess with --output-format json. It handles Windows .cmd shim resolution,
+session resumption via --resume, timeout enforcement, and parsing of the JSON
+envelope returned by Claude Code into a Response dataclass.
+"""
 from __future__ import annotations
 
 import json
@@ -31,12 +39,21 @@ class ClaudeCodeBridge:
         command = self._build_command(prompt, session_id)
         logger.debug("Invoking CC: %s", command)
 
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=_SUBPROCESS_TIMEOUT_SECONDS,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error("CC subprocess timed out after %ds", _SUBPROCESS_TIMEOUT_SECONDS)
+            return Response(
+                text="",
+                session_id=session_id or "",
+                error=f"Claude Code timed out after {_SUBPROCESS_TIMEOUT_SECONDS}s",
+            )
 
         if result.returncode != 0:
             error_text = result.stderr.strip() or f"exit code {result.returncode}"

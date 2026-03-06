@@ -1,3 +1,11 @@
+"""
+transport.py — Abstract Transport interface for ccpilot.
+
+Defines the Transport ABC that all concrete transports must implement.
+A transport is responsible for discovering unanswered user prompts (poll),
+writing back assistant responses (respond), reporting errors (report_error),
+and publishing heartbeat status updates (update_status).
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
