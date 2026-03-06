@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-06 **Rewrote sheets_transport.md to match current code**
+- Corrected tab layout: row 1 labels, row 2 input+checkbox, row 3 headers, row 4+ data (was: row 1 session_id, row 2 headers, row 3+ data)
+- Corrected column order: text | role | status | timestamp (was: timestamp | role | status | text)
+- Corrected session ID location: H1 on label row (was: A1)
+- Documented checkbox-based submission model, active/inactive tab polling tiers, crash recovery, and tab auto-initialization
+
 ## 2026-03-06 **Added module docstrings to all .py files**
 - Added module-level docstrings to `src/__init__.py`, `src/models.py`, `src/transport.py`, `src/orchestrator.py`, `src/cc_bridge.py`, and `src/sheets_transport.py` describing each module's purpose and role in the system
 
