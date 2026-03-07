@@ -26,7 +26,7 @@ poetry install
 
 ## Configuration
 
-Copy `config.example.yaml` to `config.yaml` and fill in:
+Copy `config/config.example.yaml` to `config/config.yaml` and fill in:
 
 - `google_sheets.spreadsheet_id` — from the sheet URL
 - `google_sheets.service_account_key_file` — path to service account JSON key
@@ -52,7 +52,7 @@ New tabs are auto-initialized with headers and checkbox when detected.
 ## Running
 
 ```bash
-python -m src.orchestrator config.yaml
+python -m src.orchestrator config/config.yaml
 ```
 
 Stop with Ctrl+C.
@@ -63,4 +63,4 @@ Stop with Ctrl+C.
 - **Idle polling** (default 30s) — used after no activity for 2 minutes
 - Inactive tabs (no activity for 5 minutes) are checked every 5th poll cycle
 
-All intervals are configurable in `config.yaml`.
+All intervals are configurable in `config/config.yaml`.

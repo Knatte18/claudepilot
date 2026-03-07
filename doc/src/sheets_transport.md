@@ -5,21 +5,21 @@ Concrete `Transport` implementation backed by a Google Spreadsheet, one tab per 
 ## How it works
 
 - Each spreadsheet tab represents a conversation.
-- Row 1 has labels and the session ID in J1.
+- Row 1 has labels, the session ID in J1, and a last-polled heartbeat timestamp in K1.
 - The user selects a command from the dropdown in A2, types a prompt into B2, and ticks the checkbox in C2 to submit.
 - The orchestrator concatenates the command (if any) and the prompt text, clears the input cells, inserts a user log row at the top (row 4), sends the combined text to Claude Code, and inserts the response row above.
 - Log rows are newest-first (inserted at row 4, pushing older rows down).
-- A dedicated status tab (default name: `status`) receives heartbeat updates.
 - A `_config` tab holds the command list for the dropdown. Sending `!!reload` refreshes the dropdown on all tabs without restarting.
+- Each conversation tab receives a heartbeat timestamp in K1 each time its `TabWorker` polls it.
 
 ### Tab layout
 
-| Row | Content                                                                                    |
-|-----|--------------------------------------------------------------------------------------------|
-| 1   | Labels: A1=`Command:` (bold), B1=`Prompt:` (bold), C1=`Send` (bold), D1=`Context:` (bold), E1=percentage, J1=`session_id=<id>` |
-| 2   | Input: A2=[command dropdown], B2=[user prompt, yellow bg, thick border], C2=[send checkbox] |
-| 3   | Header row: `Role \| Text \| Status \| Timestamp \| Tokens` (bold)                        |
-| 4+  | Data rows (newest first)                                                                   |
+| Row | Content                                                                                                                     |
+|-----|-----------------------------------------------------------------------------------------------------------------------------|
+| 1   | Labels: A1=`Command:` (bold), B1=`Prompt:` (bold), C1=`Send` (bold), D1=`Context:` (bold), E1=percentage, J1=`session_id=<id>`, K1=last-polled timestamp |
+| 2   | Input: A2=[command dropdown], B2=[user prompt, yellow bg, thick border], C2=[send checkbox]                                 |
+| 3   | Header row: `Role \| Text \| Status \| Timestamp \| Tokens` (bold)                                                          |
+| 4+  | Data rows (newest first)                                                                                                    |
 
 ### Column layout (data rows)
 
@@ -61,7 +61,7 @@ Users can add, remove, or reorder rows freely. Changes take effect after sending
 
 ### !!reload command
 
-Sending `!!reload` (in the text input or via the dropdown) is intercepted by the orchestrator before reaching Claude Code. It re-reads the `_config` tab and re-applies the dropdown validation to all conversation tabs. An info row is posted confirming the reload with the number of commands loaded.
+Sending `!!reload` (in the text input or via the dropdown) is intercepted by the `TabWorker` before reaching Claude Code. It re-reads the `_config` tab and re-applies the dropdown validation to all conversation tabs. An info row is posted confirming the reload with the number of commands loaded.
 
 ## `SheetsTransport`
 
@@ -79,30 +79,38 @@ SheetsTransport(
 |----------------------------|--------------------------------------------------------|
 | `service_account_key_file` | Path to the Google service account JSON key file.      |
 | `spreadsheet_id`           | The ID of the Google Spreadsheet to use.               |
-| `status_tab`               | Name of the tab used for heartbeat/status updates.     |
+| `status_tab`               | Name of the tab to exclude from conversation listing.  |
 
 Authentication uses `google.oauth2.service_account.Credentials` with the `spreadsheets` scope, authorized via `gspread`. On startup, the `_config` tab is auto-created if missing, and the command list is loaded into memory.
 
-### Polling logic (`poll`)
+### Tab listing (`list_conversations`)
 
-1. Iterates over all worksheet tabs (skipping the status and `_config` tabs).
-2. New/empty tabs are auto-initialized with labels, dropdown, input cell, checkbox, and headers.
-3. Active tabs (activity within the last 5 minutes) are checked every cycle. Inactive tabs are checked every 5th cycle. Tabs not yet seen are always checked for fast detection.
-4. Reads A1:J4 and checks whether C2 (checkbox) is `TRUE` and B2 (prompt) is non-empty.
-5. When a prompt is found:
-   - Reads the `session_id` from J1.
-   - Reads the command from A2 (dropdown).
+Returns all tab names except the status tab and `_config`.
+
+### Single-tab polling (`poll_tab`)
+
+1. Reads A1:J4 of the given tab.
+2. Checks whether C2 (checkbox) is `TRUE` and B2 (prompt) is non-empty.
+3. When a prompt is found:
+   - Reads the `session_id` from J1 and the command from A2.
    - Clears the checkbox (C2), prompt text (B2), and dropdown (A2) for immediate user feedback.
    - Inserts a user log row at row 4 with status `processing` and a light blue background.
    - Returns a `Message` with `command` and `text` as separate fields.
-6. **Crash recovery:** if the top data row (row 4) is a `user` row with status `processing` and the tab is not currently being processed, the prompt is re-dispatched.
+4. **Crash recovery:** if the top data row (row 4) is a `user` row with status `processing`, the prompt is re-dispatched.
+
+### Tab initialization (`initialize_tab_if_needed`)
+
+Reads the first three rows of the tab. If headers are missing (new or empty tab), calls `_initialize_tab` to set up labels, dropdown, input cell, checkbox, and headers.
+
+### Heartbeat (`write_heartbeat`)
+
+Writes the current UTC timestamp to K1 of the tab. Called by `TabWorker` each poll cycle as a last-polled indicator.
 
 ### Response handling
 
 - `respond` — inserts a `claude` row at row 4 (pushing the user row to row 5), marks the user row as `done`, writes the `session_id` to J1, and updates the context usage percentage in E1.
 - `report_error` — inserts an `error` row at row 4, marks the user row as `done`.
 - `report_info` — inserts an `info` row at row 4 (no user row shift).
-- `update_status` — overwrites row A1 of the status tab with a timestamped key=value heartbeat. Creates the status tab if it doesn't exist.
 - `reload_commands` — re-reads the `_config` tab and re-applies dropdown validation to all conversation tabs. Returns the command count.
 
 ### Tab auto-initialization (`_initialize_tab`)

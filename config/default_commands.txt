@@ -1,0 +1,5 @@
+!!reload
+/taskmill:discuss
+/taskmill:do
+/taskmill:commit
+/simplify

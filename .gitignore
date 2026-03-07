@@ -4,7 +4,7 @@ nul
 
 ## Secrets
 credentials/
-config.yaml
+config/config.yaml
 
 ## Python
 *.pyc

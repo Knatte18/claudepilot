@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-07 **Multithreaded orchestrator (one worker per tab)**
+- Replaced the single-threaded poll loop with a supervisor + thread-per-tab model: the `Orchestrator` runs a supervisor loop every 10s that spawns/stops `TabWorker` threads as tabs appear or disappear
+- Added `TabWorker` class in `orchestrator.py`: each worker independently polls its own tab, dispatches to Claude Code, and writes responses back — multiple conversations now run in parallel
+- Refactored `Transport` ABC: added `list_conversations()`, `poll_tab()`, `initialize_tab_if_needed()`, `write_heartbeat()` abstract/default methods; removed `poll()` and `update_status()`; promoted `get_conversation_history()` and `clear_session_id()` to the ABC
+- Refactored `SheetsTransport`: implemented new ABC methods, removed all shared mutable state (`_active_tabs`, `_processing_tabs`, `_known_tabs`, `_poll_cycle`), removed dedicated status tab; added per-tab heartbeat timestamp written to K1 each poll cycle
+- `build_orchestrator_from_config` simplified: `poll_fast_seconds`, `poll_slow_seconds`, `idle_threshold_seconds` removed from `Orchestrator` constructor (now hardcoded defaults in `TabWorker`)
+- Updated `doc/src/transport.md`, `doc/src/sheets_transport.md`, and `doc/src/orchestrator.md`
+
 ## 2026-03-07 **Dropdown menu with common CC commands**
 - Shifted all data columns right by one: column A is now Role (narrow), column B is Text (wide), C=Status, D=Timestamp, E=Tokens; session ID moved from H1 to J1
 - Added command dropdown in A2 populated from a new `_config` tab (auto-created on startup with default entries: `!!reload`, `/taskmill:discuss`, `/taskmill:do`, `/taskmill:commit`, `/simplify`)

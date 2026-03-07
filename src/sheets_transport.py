@@ -5,15 +5,14 @@ SheetsTransport implements the Transport interface using a Google Spreadsheet
 as the communication channel. Each conversation is a separate tab. Users select
 a command from the dropdown in A2, type a prompt into B2, and tick a checkbox
 in C2 to submit; the orchestrator reads both fields, concatenates them, logs a
-row, sends to Claude Code, and inserts the response above. A dedicated status
-tab is updated each poll cycle as a heartbeat. Inactive tabs are polled less
-frequently to conserve API quota. A _config tab holds the command list for the
-dropdown, and the special command !!reload refreshes the dropdown on all tabs.
+row, sends to Claude Code, and inserts the response above. A _config tab holds
+the command list for the dropdown, and the special command !!reload refreshes
+the dropdown on all tabs. Each tab shows a last-polled heartbeat timestamp in K1.
 """
 from __future__ import annotations
 
 import logging
-import time
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -32,7 +31,7 @@ _SCOPES = [
 _STATUS_TAB = "status"
 
 # Conversation tab layout:
-#   Row 1: A1="Command:" B1="Prompt:" C1="Send" D1="Context:" E1=<percentage>  J1=session_id
+#   Row 1: A1="Command:" B1="Prompt:" C1="Send" D1="Context:" E1=<percentage>  J1=session_id  K1=heartbeat
 #   Row 2: A2=[command dropdown]  B2=[user input, yellow bg, thick border]  C2=[send checkbox]
 #   Row 3: header row (Role | Text | Status | Timestamp | Tokens) (bold)
 #   Row 4+: data rows, newest first (inserted at row 4, pushing older rows down)
@@ -48,18 +47,13 @@ _COL_STATUS = 3     # C — send checkbox on _ROW_INPUT; status in data rows
 _COL_TIMESTAMP = 4  # D — timestamp in data rows
 _COL_TOKENS = 5     # E — tokens in data rows
 _COL_SESSION_ID = 10  # J (only on _ROW_LABEL, out of the way)
+_COL_HEARTBEAT = 11   # K (only on _ROW_LABEL, last-polled timestamp)
 
 _COL_CONTEXT_LABEL = 4  # D (on _ROW_LABEL)
 _COL_CONTEXT_VALUE = 5  # E (on _ROW_LABEL)
 
 _CONFIG_TAB = "_config"
-_DEFAULT_COMMANDS = [
-    "!!reload",
-    "/taskmill:discuss",
-    "/taskmill:do",
-    "/taskmill:commit",
-    "/simplify",
-]
+_DEFAULT_COMMANDS_FILE = "config/default_commands.txt"
 
 _CONTEXT_WINDOW_TOKENS = 200_000
 
@@ -107,123 +101,115 @@ class SheetsTransport(Transport):
         self._status_tab_name = status_tab
         tabs = [ws.title for ws in self._spreadsheet.worksheets()]
         logger.info("Connected to spreadsheet. Tabs: %s", tabs)
-        self._active_tabs: dict[str, float] = {}
-        self._poll_cycle = 0
-        self._processing_tabs: set[str] = set()
-        self._known_tabs: set[str] = set()
         self._ensure_config_tab()
         self._commands: list[str] = self._read_commands_from_config()
 
-    def poll(self) -> Optional[Message]:
-        """Scan conversation tabs for a prompt submitted via checkbox.
+    # ------------------------------------------------------------------
+    # Transport ABC implementation
+    # ------------------------------------------------------------------
 
-        New/empty tabs are auto-initialized with headers and checkbox.
-        Active tabs are checked every cycle; inactive tabs every 5th cycle.
-        Tabs not yet seen are always checked (for fast new-tab detection).
-        """
-        self._poll_cycle += 1
-        check_inactive = (self._poll_cycle % 5 == 0)
+    def list_conversations(self) -> list[str]:
+        """Return tab names excluding the status and _config tabs."""
+        excluded = {self._status_tab_name, _CONFIG_TAB}
+        return [ws.title for ws in self._spreadsheet.worksheets() if ws.title not in excluded]
 
-        for worksheet in self._spreadsheet.worksheets():
-            if worksheet.title == self._status_tab_name:
-                continue
+    def poll_tab(self, conversation_name: str) -> Optional[Message]:
+        """Check a single tab for a submitted prompt or a stuck processing row."""
+        try:
+            worksheet = self._spreadsheet.worksheet(conversation_name)
+            values = worksheet.get("A1:J4")
 
-            is_new_tab = worksheet.title not in self._known_tabs
-            if not is_new_tab and not self._is_tab_active(worksheet.title) and not check_inactive:
-                continue
+            if not values or len(values) < _ROW_INPUT:
+                return None
 
-            try:
-                values = worksheet.get("A1:J4")
-                self._known_tabs.add(worksheet.title)
+            label_row = values[_ROW_LABEL - 1]
+            input_row = values[_ROW_INPUT - 1] if len(values) >= _ROW_INPUT else []
+            checkbox_value = (
+                input_row[_COL_STATUS - 1].strip().upper()
+                if len(input_row) >= _COL_STATUS else ""
+            )
+            prompt_text = (
+                input_row[_COL_TEXT - 1].strip()
+                if len(input_row) >= _COL_TEXT else ""
+            )
+            command_value: Optional[str] = (
+                input_row[_COL_COMMAND - 1].strip() or None
+                if len(input_row) >= _COL_COMMAND else None
+            )
 
-                # Auto-initialize new/empty tabs.
-                if not values or len(values) < _ROW_HEADER:
-                    self._initialize_tab(worksheet)
-                    continue
+            if checkbox_value == "TRUE" and prompt_text:
+                session_id = self._read_session_id(label_row)
+                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-                label_row = values[_ROW_LABEL - 1]
-                input_row = values[_ROW_INPUT - 1] if len(values) >= _ROW_INPUT else []
-                checkbox_value = (
-                    input_row[_COL_STATUS - 1].strip().upper()
-                    if len(input_row) >= _COL_STATUS else ""
+                # Clear input first (so user sees immediate feedback).
+                worksheet.update_cell(_ROW_INPUT, _COL_STATUS, False)
+                worksheet.update_cell(_ROW_INPUT, _COL_TEXT, "")
+                worksheet.update_cell(_ROW_INPUT, _COL_COMMAND, "")
+
+                # Insert user row at top of log.
+                worksheet.insert_rows(
+                    [["user", prompt_text, "processing", timestamp]],
+                    row=_ROW_DATA_START,
+                    value_input_option="RAW",
                 )
-                prompt_text = (
-                    input_row[_COL_TEXT - 1].strip()
-                    if len(input_row) >= _COL_TEXT else ""
-                )
-                command_value: Optional[str] = (
-                    input_row[_COL_COMMAND - 1].strip() or None
-                    if len(input_row) >= _COL_COMMAND else None
+                worksheet.format(
+                    f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
+                    {"backgroundColor": _ROLE_COLORS["user"]},
                 )
 
-                if checkbox_value == "TRUE" and prompt_text:
+                return Message(
+                    conversation_name=conversation_name,
+                    text=prompt_text,
+                    session_id=session_id,
+                    command=command_value,
+                )
+
+            # Crash recovery: re-process a stuck "processing" user row.
+            if len(values) >= _ROW_DATA_START:
+                data_row = values[_ROW_DATA_START - 1]
+                role = (
+                    data_row[_COL_COMMAND - 1].strip().lower()
+                    if len(data_row) >= _COL_COMMAND else ""
+                )
+                status = (
+                    data_row[_COL_STATUS - 1].strip().lower()
+                    if len(data_row) >= _COL_STATUS else ""
+                )
+                text = (
+                    data_row[_COL_TEXT - 1].strip()
+                    if len(data_row) >= _COL_TEXT else ""
+                )
+
+                if role == "user" and status == "processing" and text:
                     session_id = self._read_session_id(label_row)
-                    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-                    # Clear input first (so user sees immediate feedback).
-                    worksheet.update_cell(_ROW_INPUT, _COL_STATUS, False)
-                    worksheet.update_cell(_ROW_INPUT, _COL_TEXT, "")
-                    worksheet.update_cell(_ROW_INPUT, _COL_COMMAND, "")
-
-                    # Insert user row at top of log.
-                    worksheet.insert_rows(
-                        [["user", prompt_text, "processing", timestamp]],
-                        row=_ROW_DATA_START,
-                        value_input_option="RAW",
+                    logger.warning(
+                        "Recovering stuck prompt in [%s]: %s",
+                        conversation_name, text[:80],
                     )
-                    worksheet.format(
-                        f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
-                        {"backgroundColor": _ROLE_COLORS["user"]},
-                    )
-
-                    self._active_tabs[worksheet.title] = time.monotonic()
-                    self._processing_tabs.add(worksheet.title)
-
                     return Message(
-                        conversation_name=worksheet.title,
-                        text=prompt_text,
+                        conversation_name=conversation_name,
+                        text=text,
                         session_id=session_id,
-                        command=command_value,
                     )
 
-                # Crash recovery: re-process a stuck "processing" user row.
-                if (
-                    len(values) >= _ROW_DATA_START
-                    and worksheet.title not in self._processing_tabs
-                ):
-                    data_row = values[_ROW_DATA_START - 1]
-                    role = (
-                        data_row[_COL_COMMAND - 1].strip().lower()
-                        if len(data_row) >= _COL_COMMAND else ""
-                    )
-                    status = (
-                        data_row[_COL_STATUS - 1].strip().lower()
-                        if len(data_row) >= _COL_STATUS else ""
-                    )
-                    text = (
-                        data_row[_COL_TEXT - 1].strip()
-                        if len(data_row) >= _COL_TEXT else ""
-                    )
-
-                    if role == "user" and status == "processing" and text:
-                        session_id = self._read_session_id(label_row)
-                        logger.warning(
-                            "Recovering stuck prompt in [%s]: %s",
-                            worksheet.title, text[:80],
-                        )
-                        self._active_tabs[worksheet.title] = time.monotonic()
-                        self._processing_tabs.add(worksheet.title)
-                        return Message(
-                            conversation_name=worksheet.title,
-                            text=text,
-                            session_id=session_id,
-                        )
-
-            except gspread.exceptions.APIError as exc:
-                logger.warning("API error on tab [%s], skipping: %s", worksheet.title, exc)
-                continue
+        except gspread.WorksheetNotFound:
+            logger.warning("Tab [%s] not found during poll.", conversation_name)
+        except gspread.exceptions.APIError as exc:
+            logger.warning("API error on tab [%s], skipping: %s", conversation_name, exc)
 
         return None
+
+    def initialize_tab_if_needed(self, conversation_name: str) -> None:
+        """Initialize a tab if it has not been set up yet (missing headers)."""
+        try:
+            worksheet = self._spreadsheet.worksheet(conversation_name)
+            values = worksheet.get("A1:C3")
+            if not values or len(values) < _ROW_HEADER:
+                self._initialize_tab(worksheet)
+        except gspread.WorksheetNotFound:
+            logger.warning("Tab [%s] not found during initialization.", conversation_name)
+        except gspread.exceptions.APIError as exc:
+            logger.warning("API error initializing tab [%s]: %s", conversation_name, exc)
 
     def respond(
         self,
@@ -258,7 +244,6 @@ class SheetsTransport(Transport):
             worksheet.update_cell(_ROW_LABEL, _COL_CONTEXT_VALUE, f"{percentage}%")
 
         self._write_session_id(worksheet, session_id)
-        self._processing_tabs.discard(conversation_name)
 
     def report_error(self, conversation_name: str, error_text: str) -> None:
         """Insert an error row at the top of the log."""
@@ -279,8 +264,6 @@ class SheetsTransport(Transport):
         # Mark the user row (now shifted to row 5) as done.
         worksheet.update_cell(_ROW_DATA_START + 1, _COL_STATUS, "done")
 
-        self._processing_tabs.discard(conversation_name)
-
     def report_info(self, conversation_name: str, info_text: str) -> None:
         """Insert an informational row at the top of the log."""
         worksheet = self._spreadsheet.worksheet(conversation_name)
@@ -295,17 +278,55 @@ class SheetsTransport(Transport):
             {"backgroundColor": _ROLE_COLORS["info"]},
         )
 
-    def update_status(self, status: dict) -> None:
-        """Overwrite the status tab with a heartbeat."""
+    def get_conversation_history(self, conversation_name: str) -> list[tuple[str, str]]:
+        """Read all log rows and return as [(role, text), ...] in chronological order.
+
+        Rows are stored newest-first in the sheet (row 4 is newest), so the
+        returned list is reversed to be chronological.
+        """
+        worksheet = self._spreadsheet.worksheet(conversation_name)
+        all_values = worksheet.get_all_values()
+        rows = all_values[_ROW_DATA_START - 1:]  # skip label, input, header rows
+        history: list[tuple[str, str]] = []
+        for row in rows:
+            role = row[_COL_COMMAND - 1].strip().lower() if len(row) >= _COL_COMMAND else ""
+            text = row[_COL_TEXT - 1].strip() if len(row) >= _COL_TEXT else ""
+            if role in ("user", "claude") and text:
+                history.append((role, text))
+        history.reverse()
+        return history
+
+    def clear_session_id(self, conversation_name: str) -> None:
+        """Remove the session ID from a conversation tab."""
+        worksheet = self._spreadsheet.worksheet(conversation_name)
+        worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, "")
+
+    def write_heartbeat(self, conversation_name: str) -> None:
+        """Write the current UTC timestamp to K1 of the tab as a last-polled heartbeat."""
         try:
-            status_worksheet = self._spreadsheet.worksheet(self._status_tab_name)
-        except gspread.WorksheetNotFound:
-            status_worksheet = self._spreadsheet.add_worksheet(
-                title=self._status_tab_name, rows=1, cols=10
-            )
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        row_values = [timestamp] + [f"{k}={v}" for k, v in status.items()]
-        status_worksheet.update("A1", [row_values])
+            worksheet = self._spreadsheet.worksheet(conversation_name)
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            worksheet.update_cell(_ROW_LABEL, _COL_HEARTBEAT, timestamp)
+        except gspread.exceptions.APIError as exc:
+            logger.warning("Failed to write heartbeat to [%s]: %s", conversation_name, exc)
+
+    def reload_commands(self) -> int:
+        """Re-read _config and re-apply dropdown validation to all conversation tabs.
+
+        Returns the number of commands loaded.
+        """
+        self._commands = self._read_commands_from_config()
+        for worksheet in self._spreadsheet.worksheets():
+            if worksheet.title in (self._status_tab_name, _CONFIG_TAB):
+                continue
+            try:
+                self._apply_dropdown_validation(worksheet, self._commands)
+            except gspread.exceptions.APIError as exc:
+                logger.warning(
+                    "Failed to apply dropdown validation to [%s]: %s", worksheet.title, exc
+                )
+        logger.info("Reloaded %d commands from _config.", len(self._commands))
+        return len(self._commands)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -375,9 +396,6 @@ class SheetsTransport(Transport):
         # Dropdown validation on A2 from _config command list.
         self._apply_dropdown_validation(worksheet, self._commands)
 
-        # Mark as active so it gets polled frequently right away.
-        self._active_tabs[worksheet.title] = time.monotonic()
-
         logger.info("Initialized tab [%s]", worksheet.title)
 
     def _read_session_id(self, label_row: list[str]) -> Optional[str]:
@@ -392,41 +410,28 @@ class SheetsTransport(Transport):
     def _write_session_id(self, worksheet: gspread.Worksheet, session_id: str) -> None:
         worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, f"session_id={session_id}")
 
-    def get_conversation_history(self, conversation_name: str) -> list[tuple[str, str]]:
-        """Read all log rows and return as [(role, text), ...] in chronological order.
-
-        Rows are stored newest-first in the sheet (row 4 is newest), so the
-        returned list is reversed to be chronological.
-        """
-        worksheet = self._spreadsheet.worksheet(conversation_name)
-        all_values = worksheet.get_all_values()
-        rows = all_values[_ROW_DATA_START - 1:]  # skip label, input, header rows
-        history: list[tuple[str, str]] = []
-        for row in rows:
-            role = row[_COL_COMMAND - 1].strip().lower() if len(row) >= _COL_COMMAND else ""
-            text = row[_COL_TEXT - 1].strip() if len(row) >= _COL_TEXT else ""
-            if role in ("user", "claude") and text:
-                history.append((role, text))
-        history.reverse()
-        return history
-
-    def clear_session_id(self, conversation_name: str) -> None:
-        """Remove the session ID from a conversation tab."""
-        worksheet = self._spreadsheet.worksheet(conversation_name)
-        worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, "")
+    def _load_default_commands(self) -> list[str]:
+        """Read default commands from config/default_commands.txt."""
+        try:
+            with open(_DEFAULT_COMMANDS_FILE, "r", encoding="utf-8") as fh:
+                return [line.strip() for line in fh if line.strip()]
+        except FileNotFoundError:
+            logger.warning("%s not found; using empty command list.", _DEFAULT_COMMANDS_FILE)
+            return []
 
     def _ensure_config_tab(self) -> None:
         """Create the _config tab with default commands if it does not exist."""
         existing_titles = {ws.title for ws in self._spreadsheet.worksheets()}
         if _CONFIG_TAB in existing_titles:
             return
+        defaults = self._load_default_commands()
         config_worksheet = self._spreadsheet.add_worksheet(
-            title=_CONFIG_TAB, rows=len(_DEFAULT_COMMANDS) + 5, cols=2
+            title=_CONFIG_TAB, rows=len(defaults) + 5, cols=2
         )
-        rows = [["Commands"]] + [[cmd] for cmd in _DEFAULT_COMMANDS]
+        rows = [["Commands"]] + [[cmd] for cmd in defaults]
         config_worksheet.update("A1", rows, value_input_option="RAW")
         config_worksheet.format("A1", {"textFormat": {"bold": True}})
-        logger.info("Created _config tab with %d default commands.", len(_DEFAULT_COMMANDS))
+        logger.info("Created _config tab with %d default commands.", len(defaults))
 
     def _read_commands_from_config(self) -> list[str]:
         """Read command list from column A of the _config tab, skipping the header row."""
@@ -436,7 +441,7 @@ class SheetsTransport(Transport):
             return [v.strip() for v in all_values[1:] if v.strip()]
         except gspread.WorksheetNotFound:
             logger.warning("_config tab not found; using default commands.")
-            return list(_DEFAULT_COMMANDS)
+            return self._load_default_commands()
 
     def _apply_dropdown_validation(
         self, worksheet: gspread.Worksheet, commands: list[str]
@@ -466,27 +471,3 @@ class SheetsTransport(Transport):
                 }
             ]
         })
-
-    def reload_commands(self) -> int:
-        """Re-read _config and re-apply dropdown validation to all conversation tabs.
-
-        Returns the number of commands loaded.
-        """
-        self._commands = self._read_commands_from_config()
-        for worksheet in self._spreadsheet.worksheets():
-            if worksheet.title in (self._status_tab_name, _CONFIG_TAB):
-                continue
-            try:
-                self._apply_dropdown_validation(worksheet, self._commands)
-            except gspread.exceptions.APIError as exc:
-                logger.warning(
-                    "Failed to apply dropdown validation to [%s]: %s", worksheet.title, exc
-                )
-        logger.info("Reloaded %d commands from _config.", len(self._commands))
-        return len(self._commands)
-
-    def _is_tab_active(self, tab_name: str) -> bool:
-        last_activity = self._active_tabs.get(tab_name)
-        if last_activity is None:
-            return False
-        return (time.monotonic() - last_activity) < 300

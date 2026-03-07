@@ -2,9 +2,10 @@
 transport.py — Abstract Transport interface for ccpilot.
 
 Defines the Transport ABC that all concrete transports must implement.
-A transport is responsible for discovering unanswered user prompts (poll),
-writing back assistant responses (respond), reporting errors (report_error),
-and publishing heartbeat status updates (update_status).
+A transport is responsible for listing conversation tabs (list_conversations),
+polling a single tab for unanswered prompts (poll_tab), initializing tabs
+(initialize_tab_if_needed), writing back assistant responses (respond),
+and reporting errors (report_error).
 """
 from __future__ import annotations
 
@@ -22,8 +23,16 @@ class Transport(ABC):
     """
 
     @abstractmethod
-    def poll(self) -> Optional[Message]:
-        """Return the next unanswered user prompt, or None."""
+    def list_conversations(self) -> list[str]:
+        """Return the names of all active conversation tabs."""
+
+    @abstractmethod
+    def poll_tab(self, conversation_name: str) -> Optional[Message]:
+        """Return the next unanswered user prompt from a specific tab, or None."""
+
+    @abstractmethod
+    def initialize_tab_if_needed(self, conversation_name: str) -> None:
+        """Initialize a tab with labels, input cell, checkbox, and headers if not yet set up."""
 
     @abstractmethod
     def respond(
@@ -45,8 +54,15 @@ class Transport(ABC):
         """Append an informational message to the conversation."""
 
     @abstractmethod
-    def update_status(self, status: dict) -> None:
-        """Publish a status/heartbeat dictionary."""
+    def get_conversation_history(self, conversation_name: str) -> list[tuple[str, str]]:
+        """Return conversation log as [(role, text), ...] in chronological order."""
+
+    @abstractmethod
+    def clear_session_id(self, conversation_name: str) -> None:
+        """Remove the session ID from a conversation tab."""
+
+    def write_heartbeat(self, conversation_name: str) -> None:
+        """Write a last-polled timestamp to the tab. Default implementation is a no-op."""
 
     def reload_commands(self) -> int:
         """Reload command list and re-apply to all conversation tabs.
