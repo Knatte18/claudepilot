@@ -5,13 +5,16 @@ description = "Remote control of Claude Code via Google Sheets"
 authors = [
     {name = "hanf"}
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "gspread (>=6.2.1,<7.0.0)",
     "google-auth (>=2.48.0,<3.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)"
 ]
 
+
+[tool.poetry]
+package-mode = false
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

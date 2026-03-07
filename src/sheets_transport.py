@@ -57,6 +57,7 @@ _ROLE_COLORS = {
     "claude": {"red": 0.85, "green": 0.93, "blue": 0.83},  # light green
     "error": {"red": 0.96, "green": 0.80, "blue": 0.80},   # light red
     "user": {"red": 0.87, "green": 0.92, "blue": 0.97},    # light blue
+    "info": {"red": 1.0, "green": 0.95, "blue": 0.70},     # light amber
 }
 
 _INPUT_COLOR = {"red": 1.0, "green": 0.95, "blue": 0.80}  # light yellow
@@ -260,6 +261,20 @@ class SheetsTransport(Transport):
 
         self._processing_tabs.discard(conversation_name)
 
+    def report_info(self, conversation_name: str, info_text: str) -> None:
+        """Insert an informational row at the top of the log."""
+        worksheet = self._spreadsheet.worksheet(conversation_name)
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        worksheet.insert_rows(
+            [[info_text, "info", "done", timestamp]],
+            row=_ROW_DATA_START,
+            value_input_option="RAW",
+        )
+        worksheet.format(
+            f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
+            {"backgroundColor": _ROLE_COLORS["info"]},
+        )
+
     def update_status(self, status: dict) -> None:
         """Overwrite the status tab with a heartbeat."""
         try:
@@ -353,6 +368,29 @@ class SheetsTransport(Transport):
 
     def _write_session_id(self, worksheet: gspread.Worksheet, session_id: str) -> None:
         worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, f"session_id={session_id}")
+
+    def get_conversation_history(self, conversation_name: str) -> list[tuple[str, str]]:
+        """Read all log rows and return as [(role, text), ...] in chronological order.
+
+        Rows are stored newest-first in the sheet (row 4 is newest), so the
+        returned list is reversed to be chronological.
+        """
+        worksheet = self._spreadsheet.worksheet(conversation_name)
+        all_values = worksheet.get_all_values()
+        rows = all_values[_ROW_DATA_START - 1:]  # skip label, input, header rows
+        history: list[tuple[str, str]] = []
+        for row in rows:
+            text = row[_COL_TEXT - 1].strip() if len(row) >= _COL_TEXT else ""
+            role = row[_COL_ROLE - 1].strip().lower() if len(row) >= _COL_ROLE else ""
+            if role in ("user", "claude") and text:
+                history.append((role, text))
+        history.reverse()
+        return history
+
+    def clear_session_id(self, conversation_name: str) -> None:
+        """Remove the session ID from a conversation tab."""
+        worksheet = self._spreadsheet.worksheet(conversation_name)
+        worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, "")
 
     def _is_tab_active(self, tab_name: str) -> bool:
         last_activity = self._active_tabs.get(tab_name)

@@ -41,5 +41,9 @@ class Transport(ABC):
         """Append an error message to the conversation."""
 
     @abstractmethod
+    def report_info(self, conversation_name: str, info_text: str) -> None:
+        """Append an informational message to the conversation."""
+
+    @abstractmethod
     def update_status(self, status: dict) -> None:
         """Publish a status/heartbeat dictionary."""

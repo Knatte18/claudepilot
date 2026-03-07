@@ -80,7 +80,59 @@ class Orchestrator:
 
         response = self._bridge.send(message.text, session_id=message.session_id)
 
-        if response.is_error:
+        if response.is_error and "No conversation found with session ID" in (response.error or ""):
+            logger.warning(
+                "Session not found in [%s], spawning new session with history replay.",
+                message.conversation_name,
+            )
+            self._transport.clear_session_id(message.conversation_name)
+
+            # Build a context prompt from sheet history (excluding the current prompt,
+            # which is the last user entry).
+            history = self._transport.get_conversation_history(message.conversation_name)
+            # Drop the last user entry — that's the prompt we're about to send.
+            if history and history[-1][0] == "user":
+                history = history[:-1]
+
+            context_lines = []
+            if history:
+                context_lines.append(
+                    "This conversation was started on another machine. "
+                    "Here is the prior conversation history for context:\n"
+                )
+                for role, text in history:
+                    label = "User" if role == "user" else "Assistant"
+                    context_lines.append(f"[{label}]: {text}\n")
+                context_lines.append(
+                    "---\nThe conversation continues. Respond to the following new prompt:\n"
+                )
+
+            replay_prompt = "".join(context_lines) + message.text
+            response = self._bridge.send(replay_prompt, session_id=None)
+
+            if response.is_error:
+                logger.error("CC error in [%s] after session respawn: %s", message.conversation_name, response.error)
+                self._transport.report_error(message.conversation_name, response.error or "unknown error")
+            else:
+                # Post a notification that the session was respawned.
+                self._transport.report_info(
+                    message.conversation_name,
+                    "Session not found on this machine — new session spawned with conversation history.",
+                )
+                self._transport.respond(
+                    message.conversation_name,
+                    response.text,
+                    response.session_id,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                )
+                logger.info(
+                    "Responded in [%s] after session respawn (tokens in=%d out=%d)",
+                    message.conversation_name,
+                    response.input_tokens,
+                    response.output_tokens,
+                )
+        elif response.is_error:
             logger.error("CC error in [%s]: %s", message.conversation_name, response.error)
             self._transport.report_error(message.conversation_name, response.error or "unknown error")
         else:
