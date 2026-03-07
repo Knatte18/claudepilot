@@ -47,3 +47,10 @@ class Transport(ABC):
     @abstractmethod
     def update_status(self, status: dict) -> None:
         """Publish a status/heartbeat dictionary."""
+
+    def reload_commands(self) -> int:
+        """Reload command list and re-apply to all conversation tabs.
+
+        Returns the number of commands loaded. Default implementation is a no-op.
+        """
+        return 0

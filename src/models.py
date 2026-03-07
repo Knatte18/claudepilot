@@ -17,6 +17,7 @@ class Message:
     conversation_name: str
     text: str
     session_id: Optional[str]
+    command: Optional[str] = None
 
 
 @dataclass

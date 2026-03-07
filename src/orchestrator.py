@@ -78,7 +78,21 @@ class Orchestrator:
         logger.info("Processing prompt in [%s]", message.conversation_name)
         self._transport.update_status({"state": "processing", "conversation": message.conversation_name})
 
-        response = self._bridge.send(message.text, session_id=message.session_id)
+        combined_prompt = (
+            f"{message.command} {message.text}".strip()
+            if message.command
+            else message.text
+        )
+
+        if combined_prompt.startswith("!!reload"):
+            command_count = self._transport.reload_commands()
+            self._transport.report_info(
+                message.conversation_name,
+                f"Commands reloaded from _config ({command_count} entries).",
+            )
+            return True
+
+        response = self._bridge.send(combined_prompt, session_id=message.session_id)
 
         if response.is_error and "No conversation found with session ID" in (response.error or ""):
             logger.warning(
@@ -107,7 +121,7 @@ class Orchestrator:
                     "---\nThe conversation continues. Respond to the following new prompt:\n"
                 )
 
-            replay_prompt = "".join(context_lines) + message.text
+            replay_prompt = "".join(context_lines) + combined_prompt
             response = self._bridge.send(replay_prompt, session_id=None)
 
             if response.is_error:

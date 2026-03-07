@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-03-07 **Dropdown menu with common CC commands**
+- Shifted all data columns right by one: column A is now Role (narrow), column B is Text (wide), C=Status, D=Timestamp, E=Tokens; session ID moved from H1 to J1
+- Added command dropdown in A2 populated from a new `_config` tab (auto-created on startup with default entries: `!!reload`, `/taskmill:discuss`, `/taskmill:do`, `/taskmill:commit`, `/simplify`)
+- The orchestrator concatenates the dropdown command and prompt text before sending to Claude Code
+- Added `!!reload` special command: intercepted by the orchestrator, re-reads `_config`, re-applies dropdown validation to all conversation tabs, and posts a confirmation info row
+- Added `command` field to the `Message` dataclass in `models.py`
+- Added `reload_commands` default method to the `Transport` ABC; implemented in `SheetsTransport`
+- Updated `doc/src/sheets_transport.md` to reflect new layout, `_config` tab, and `!!reload`
+
 ## 2026-03-06 **Rewrote sheets_transport.md to match current code**
 - Corrected tab layout: row 1 labels, row 2 input+checkbox, row 3 headers, row 4+ data (was: row 1 session_id, row 2 headers, row 3+ data)
 - Corrected column order: text | role | status | timestamp (was: timestamp | role | status | text)
