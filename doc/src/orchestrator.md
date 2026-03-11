@@ -35,7 +35,7 @@ TabWorker(
 Runs the worker loop until `stop_event` is set:
 
 1. Calls `transport.initialize_tab_if_needed()` once on startup.
-2. Loops: calls `transport.poll_tab()`, then `transport.write_heartbeat()`.
+2. Loops: calls `transport.poll_tab()`, then `transport.write_heartbeat()` (throttled to every 30 seconds).
 3. If a message is found, calls `_handle_message()` and records the activity time.
 4. Sleeps for `poll_fast_seconds` if active recently, or `poll_slow_seconds` if idle longer than `idle_threshold_seconds`. Sleep is done in 1-second increments so `stop_event` is checked promptly.
 
@@ -46,7 +46,7 @@ Processes a single prompt:
 1. Prepends the command (if any) to the prompt text.
 2. Intercepts `!!reload` — reloads commands from `_config` and posts an info row.
 3. Sends the combined prompt to the Claude Code bridge.
-4. **Session recovery:** if CC returns "No conversation found with session ID", clears the session ID, builds a context prompt from the tab's history, and spawns a new session. Posts an info row noting the respawn.
+4. **Session recovery:** if CC returns "No conversation found with session ID", clears the session ID, builds a context prompt from the tab's history (capped at the last 20 message pairs), and spawns a new session. Posts an info row noting the respawn.
 5. On error, posts an error row. On success, posts the response and logs token usage.
 
 ## `Orchestrator`
@@ -96,6 +96,7 @@ google_sheets:
 claude_code:
   permission_mode: bypassPermissions  # optional
   executable: claude                  # optional
+  subprocess_timeout_seconds: 300     # optional
   poll_fast_seconds: 2                # optional
   poll_slow_seconds: 30               # optional
   idle_threshold_seconds: 120         # optional

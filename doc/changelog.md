@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-11 **Updated source documentation**
+- `cc_bridge.md`: added `timeout_seconds` parameter, removed `.cmd` shim docs
+- `orchestrator.md`: added `subprocess_timeout_seconds` to config example, documented heartbeat throttling (30s) and session respawn history cap (20 pairs)
+- `sheets_transport.md`: shortened `_config` example, documented comment support and retry logic
+- `models.md`: added `command` field to `Message`
+
 ## 2026-03-11 **Updated default_commands.txt**
 - Added comment support (`#` lines) to `_load_default_commands()` in `sheets_transport.py`
 - Synced `default_commands.txt` with all 14 current taskmill commands plus `!!reload` and `/simplify`

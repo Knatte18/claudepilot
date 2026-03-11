@@ -9,6 +9,7 @@ Represents a user prompt discovered in a conversation tab.
 | Field               | Type            | Description                                      |
 |---------------------|-----------------|--------------------------------------------------|
 | `conversation_name` | `str`           | Name of the conversation (matches the tab title). |
+| `command`           | `Optional[str]` | Command selected from the dropdown (e.g. `/taskmill:discuss`). `None` if no command selected. |
 | `text`              | `str`           | The user's prompt text.                          |
 | `session_id`        | `Optional[str]` | Claude Code session ID for resuming a conversation. `None` for new conversations. |
 

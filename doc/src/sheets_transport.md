@@ -52,12 +52,12 @@ The `_config` tab stores the command list for the A2 dropdown. It is auto-create
 |-----|----------------|
 | 1   | **Commands**   |
 | 2   | !!reload       |
-| 3   | /taskmill:discuss |
-| 4   | /taskmill:do   |
-| 5   | /taskmill:commit |
-| 6   | /simplify      |
+| 3   | /simplify      |
+| 4   | /taskmill:discuss |
+| 5   | /taskmill:do   |
+| ... | *(etc.)*       |
 
-Users can add, remove, or reorder rows freely. Changes take effect after sending `!!reload` from any conversation tab.
+The full list is read from `config/default_commands.txt` on first startup. That file supports `#` comment lines. Users can add, remove, or reorder rows in the `_config` tab freely. Changes take effect after sending `!!reload` from any conversation tab.
 
 ### !!reload command
 
@@ -82,6 +82,10 @@ SheetsTransport(
 | `status_tab`               | Name of the tab to exclude from conversation listing.  |
 
 Authentication uses `google.oauth2.service_account.Credentials` with the `spreadsheets` scope, authorized via `gspread`. On startup, the `_config` tab is auto-created if missing, and the command list is loaded into memory.
+
+### Retry logic
+
+All gspread API calls are wrapped in `_retry_api_call()`, which retries up to 3 times with exponential backoff (1s, 2s, 4s) on transient errors (HTTP 429 and 503).
 
 ### Tab listing (`list_conversations`)
 
