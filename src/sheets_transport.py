@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -67,6 +68,30 @@ _ROLE_COLORS = {
 
 _INPUT_COLOR = {"red": 1.0, "green": 0.95, "blue": 0.80}  # light yellow
 
+_RETRYABLE_STATUS_CODES = {429, 503}
+_MAX_RETRY_ATTEMPTS = 3
+
+_T = TypeVar("_T")
+
+
+def _retry_api_call(func: Callable[[], _T], max_attempts: int = _MAX_RETRY_ATTEMPTS) -> _T:
+    """Call func with exponential backoff on transient gspread API errors (429, 503)."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return func()
+        except gspread.exceptions.APIError as exc:
+            if exc.response.status_code not in _RETRYABLE_STATUS_CODES:
+                raise
+            if attempt == max_attempts:
+                raise
+            delay = 2 ** (attempt - 1)
+            logger.warning(
+                "Transient API error (HTTP %d), retrying in %ds (attempt %d/%d)",
+                exc.response.status_code, delay, attempt, max_attempts,
+            )
+            time.sleep(delay)
+    raise RuntimeError("unreachable")
+
 
 class SheetsTransport(Transport):
     """Transport backed by a Google Spreadsheet, one tab per conversation.
@@ -117,7 +142,7 @@ class SheetsTransport(Transport):
         """Check a single tab for a submitted prompt or a stuck processing row."""
         try:
             worksheet = self._spreadsheet.worksheet(conversation_name)
-            values = worksheet.get("A1:J4")
+            values = _retry_api_call(lambda: worksheet.get("A1:J4"))
 
             if not values or len(values) < _ROW_INPUT:
                 return None
@@ -225,23 +250,23 @@ class SheetsTransport(Transport):
         tokens_cell = f"{input_tokens} / {output_tokens}" if input_tokens or output_tokens else ""
 
         # Insert response row at top of log (pushes user row from 4 to 5).
-        worksheet.insert_rows(
+        _retry_api_call(lambda: worksheet.insert_rows(
             [["claude", text, "done", timestamp, tokens_cell]],
             row=_ROW_DATA_START,
             value_input_option="RAW",
-        )
-        worksheet.format(
+        ))
+        _retry_api_call(lambda: worksheet.format(
             f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
             {"backgroundColor": _ROLE_COLORS["claude"]},
-        )
+        ))
 
         # Mark the user row (now shifted to row 5) as done.
-        worksheet.update_cell(_ROW_DATA_START + 1, _COL_STATUS, "done")
+        _retry_api_call(lambda: worksheet.update_cell(_ROW_DATA_START + 1, _COL_STATUS, "done"))
 
         # Update context usage percentage on the label row.
         if input_tokens:
             percentage = min(round(input_tokens / _CONTEXT_WINDOW_TOKENS * 100), 100)
-            worksheet.update_cell(_ROW_LABEL, _COL_CONTEXT_VALUE, f"{percentage}%")
+            _retry_api_call(lambda: worksheet.update_cell(_ROW_LABEL, _COL_CONTEXT_VALUE, f"{percentage}%"))
 
         self._write_session_id(worksheet, session_id)
 
@@ -251,32 +276,32 @@ class SheetsTransport(Transport):
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
         # Insert error row at top of log (pushes user row from 4 to 5).
-        worksheet.insert_rows(
+        _retry_api_call(lambda: worksheet.insert_rows(
             [["error", error_text, "done", timestamp]],
             row=_ROW_DATA_START,
             value_input_option="RAW",
-        )
-        worksheet.format(
+        ))
+        _retry_api_call(lambda: worksheet.format(
             f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
             {"backgroundColor": _ROLE_COLORS["error"]},
-        )
+        ))
 
         # Mark the user row (now shifted to row 5) as done.
-        worksheet.update_cell(_ROW_DATA_START + 1, _COL_STATUS, "done")
+        _retry_api_call(lambda: worksheet.update_cell(_ROW_DATA_START + 1, _COL_STATUS, "done"))
 
     def report_info(self, conversation_name: str, info_text: str) -> None:
         """Insert an informational row at the top of the log."""
         worksheet = self._spreadsheet.worksheet(conversation_name)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        worksheet.insert_rows(
+        _retry_api_call(lambda: worksheet.insert_rows(
             [["info", info_text, "done", timestamp]],
             row=_ROW_DATA_START,
             value_input_option="RAW",
-        )
-        worksheet.format(
+        ))
+        _retry_api_call(lambda: worksheet.format(
             f"A{_ROW_DATA_START}:E{_ROW_DATA_START}",
             {"backgroundColor": _ROLE_COLORS["info"]},
-        )
+        ))
 
     def get_conversation_history(self, conversation_name: str) -> list[tuple[str, str]]:
         """Read all log rows and return as [(role, text), ...] in chronological order.
@@ -285,7 +310,7 @@ class SheetsTransport(Transport):
         returned list is reversed to be chronological.
         """
         worksheet = self._spreadsheet.worksheet(conversation_name)
-        all_values = worksheet.get_all_values()
+        all_values = _retry_api_call(lambda: worksheet.get_all_values())
         rows = all_values[_ROW_DATA_START - 1:]  # skip label, input, header rows
         history: list[tuple[str, str]] = []
         for row in rows:
@@ -299,14 +324,14 @@ class SheetsTransport(Transport):
     def clear_session_id(self, conversation_name: str) -> None:
         """Remove the session ID from a conversation tab."""
         worksheet = self._spreadsheet.worksheet(conversation_name)
-        worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, "")
+        _retry_api_call(lambda: worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, ""))
 
     def write_heartbeat(self, conversation_name: str) -> None:
         """Write the current UTC timestamp to K1 of the tab as a last-polled heartbeat."""
         try:
             worksheet = self._spreadsheet.worksheet(conversation_name)
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-            worksheet.update_cell(_ROW_LABEL, _COL_HEARTBEAT, timestamp)
+            _retry_api_call(lambda: worksheet.update_cell(_ROW_LABEL, _COL_HEARTBEAT, timestamp))
         except gspread.exceptions.APIError as exc:
             logger.warning("Failed to write heartbeat to [%s]: %s", conversation_name, exc)
 
@@ -408,7 +433,7 @@ class SheetsTransport(Transport):
         return None
 
     def _write_session_id(self, worksheet: gspread.Worksheet, session_id: str) -> None:
-        worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, f"session_id={session_id}")
+        _retry_api_call(lambda: worksheet.update_cell(_ROW_LABEL, _COL_SESSION_ID, f"session_id={session_id}"))
 
     def _load_default_commands(self) -> list[str]:
         """Read default commands from config/default_commands.txt."""

@@ -54,6 +54,8 @@ class TabWorker:
         self._poll_slow = poll_slow_seconds
         self._idle_threshold = idle_threshold_seconds
         self._last_activity = time.monotonic()
+        self._last_heartbeat = 0.0
+        self._heartbeat_interval = 30
 
     def run(self) -> None:
         logger.info("TabWorker started for [%s]", self._tab_name)
@@ -65,7 +67,10 @@ class TabWorker:
         while not self._stop_event.is_set():
             try:
                 message = self._transport.poll_tab(self._tab_name)
-                self._transport.write_heartbeat(self._tab_name)
+                now = time.monotonic()
+                if now - self._last_heartbeat >= self._heartbeat_interval:
+                    self._transport.write_heartbeat(self._tab_name)
+                    self._last_heartbeat = now
                 if message is not None:
                     self._handle_message(message)
                     self._last_activity = time.monotonic()

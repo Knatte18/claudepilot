@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-11 **Optimized Sheets API usage**
+- Added `_retry_api_call()` helper in `sheets_transport.py` with exponential backoff (3 attempts, 1s/2s/4s delays) for transient gspread API errors (HTTP 429 and 503)
+- Wrapped all gspread API calls in `poll_tab()`, `respond()`, `report_error()`, `report_info()`, `write_heartbeat()`, `get_conversation_history()`, `clear_session_id()`, and `_write_session_id()` with the retry helper
+- Throttled heartbeat writes in `orchestrator.py` `TabWorker` from every poll cycle (every 2s when active) to every 30 seconds, cutting idle API usage in half
+- Added `tests/test_sheets_transport.py` with 6 tests for retry logic and `tests/test_orchestrator.py` with 3 tests for heartbeat throttling
+
 ## 2026-03-07 **Multithreaded orchestrator (one worker per tab)**
 - Replaced the single-threaded poll loop with a supervisor + thread-per-tab model: the `Orchestrator` runs a supervisor loop every 10s that spawns/stops `TabWorker` threads as tabs appear or disappear
 - Added `TabWorker` class in `orchestrator.py`: each worker independently polls its own tab, dispatches to Claude Code, and writes responses back — multiple conversations now run in parallel
