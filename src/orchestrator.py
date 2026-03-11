@@ -26,6 +26,7 @@ from src.transport import Transport
 logger = logging.getLogger(__name__)
 
 _SUPERVISOR_INTERVAL = 10  # seconds between tab-list checks
+_MAX_RESPAWN_HISTORY_PAIRS = 20  # max (role, text) pairs replayed on session recovery
 
 
 class TabWorker:
@@ -114,6 +115,7 @@ class TabWorker:
             # Drop the last user entry — that's the prompt we're about to send.
             if history and history[-1][0] == "user":
                 history = history[:-1]
+            history = history[-_MAX_RESPAWN_HISTORY_PAIRS:]
 
             context_lines = []
             if history:

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-11 **Capped session respawn history**
+- Added `_MAX_RESPAWN_HISTORY_PAIRS = 20` constant in `orchestrator.py` to limit the number of history pairs replayed when recovering a lost CC session
+- Slices `history` to the last 20 entries after fetching, preventing oversized replay prompts on long conversations
+
 ## 2026-03-11 **Optimized Sheets API usage**
 - Added `_retry_api_call()` helper in `sheets_transport.py` with exponential backoff (3 attempts, 1s/2s/4s delays) for transient gspread API errors (HTTP 429 and 503)
 - Wrapped all gspread API calls in `poll_tab()`, `respond()`, `report_error()`, `report_info()`, `write_heartbeat()`, `get_conversation_history()`, `clear_session_id()`, and `_write_session_id()` with the retry helper
