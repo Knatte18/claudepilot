@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-11 **Updated default_commands.txt**
+- Added comment support (`#` lines) to `_load_default_commands()` in `sheets_transport.py`
+- Synced `default_commands.txt` with all 14 current taskmill commands plus `!!reload` and `/simplify`
+
 ## 2026-03-11 **Hardened cc_bridge**
 - Removed `.cmd` shim / node resolution logic from `_resolve_executable()` — the executable path is configured directly in `config.yaml`
 - Made subprocess timeout configurable: added `subprocess_timeout_seconds` to `config.yaml` (default 300), passed through `ClaudeCodeBridge.__init__`

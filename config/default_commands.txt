@@ -1,5 +1,18 @@
+# Dropdown commands for Google Sheets conversation tabs.
+# Source: taskmill plugin commands + project-specific entries.
 !!reload
+/simplify
+/taskmill:add
+/taskmill:add-discuss
+/taskmill:commit
 /taskmill:discuss
 /taskmill:do
-/taskmill:commit
-/simplify
+/taskmill:do-all
+/taskmill:do-commit
+/taskmill:finalize
+/taskmill:finalize-do
+/taskmill:finalize-do-all
+/taskmill:finalize-do-commit
+/taskmill:list
+/taskmill:log
+/taskmill:retry

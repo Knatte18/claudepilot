@@ -439,7 +439,7 @@ class SheetsTransport(Transport):
         """Read default commands from config/default_commands.txt."""
         try:
             with open(_DEFAULT_COMMANDS_FILE, "r", encoding="utf-8") as fh:
-                return [line.strip() for line in fh if line.strip()]
+                return [line.strip() for line in fh if line.strip() and not line.startswith("#")]
         except FileNotFoundError:
             logger.warning("%s not found; using empty command list.", _DEFAULT_COMMANDS_FILE)
             return []
