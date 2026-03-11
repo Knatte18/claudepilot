@@ -271,6 +271,7 @@ def build_orchestrator_from_config(config_path: str) -> Orchestrator:
     bridge = ClaudeCodeBridge(
         permission_mode=cc_config.get("permission_mode", "bypassPermissions"),
         executable=cc_config.get("executable", "claude"),
+        timeout_seconds=cc_config.get("subprocess_timeout_seconds", 300),
     )
 
     return Orchestrator(

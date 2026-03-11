@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-03-11 **Hardened cc_bridge**
+- Removed `.cmd` shim / node resolution logic from `_resolve_executable()` — the executable path is configured directly in `config.yaml`
+- Made subprocess timeout configurable: added `subprocess_timeout_seconds` to `config.yaml` (default 300), passed through `ClaudeCodeBridge.__init__`
+
 ## 2026-03-11 **Capped session respawn history**
 - Added `_MAX_RESPAWN_HISTORY_PAIRS = 20` constant in `orchestrator.py` to limit the number of history pairs replayed when recovering a lost CC session
 - Slices `history` to the last 20 entries after fetching, preventing oversized replay prompts on long conversations

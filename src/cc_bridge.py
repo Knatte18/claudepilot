@@ -10,16 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 from typing import Optional
 
 from src.models import Response
 
 logger = logging.getLogger(__name__)
-
-# Timeout for a single Claude Code invocation (seconds).
-_SUBPROCESS_TIMEOUT_SECONDS = 300
 
 
 class ClaudeCodeBridge:
@@ -29,10 +25,15 @@ class ClaudeCodeBridge:
     Response to continue an existing conversation (--resume).
     """
 
-    def __init__(self, permission_mode: str = "bypassPermissions", executable: str = "claude") -> None:
+    def __init__(
+        self,
+        permission_mode: str = "bypassPermissions",
+        executable: str = "claude",
+        timeout_seconds: int = 300,
+    ) -> None:
         self._permission_mode = permission_mode
         self._executable = executable
-        self._node_path, self._cli_script = self._resolve_executable(executable)
+        self._timeout_seconds = timeout_seconds
 
     def send(self, prompt: str, session_id: Optional[str] = None) -> Response:
         """Send a prompt to Claude Code and return the parsed Response."""
@@ -45,14 +46,14 @@ class ClaudeCodeBridge:
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+                timeout=self._timeout_seconds,
             )
         except subprocess.TimeoutExpired:
-            logger.error("CC subprocess timed out after %ds", _SUBPROCESS_TIMEOUT_SECONDS)
+            logger.error("CC subprocess timed out after %ds", self._timeout_seconds)
             return Response(
                 text="",
                 session_id=session_id or "",
-                error=f"Claude Code timed out after {_SUBPROCESS_TIMEOUT_SECONDS}s",
+                error=f"Claude Code timed out after {self._timeout_seconds}s",
             )
 
         if result.returncode != 0:
@@ -66,32 +67,8 @@ class ClaudeCodeBridge:
     # Private helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _resolve_executable(executable: str) -> tuple[str, str]:
-        """Resolve a claude .cmd wrapper to (node_path, cli_script_path).
-
-        On Windows, claude is a .cmd shim that calls node. We bypass it and
-        invoke node directly to avoid PATH issues with cmd.exe.
-        """
-        if executable.endswith(".cmd") and os.path.isfile(executable):
-            cmd_dir = os.path.dirname(executable)
-            cli_script = os.path.join(
-                cmd_dir, "node_modules", "@anthropic-ai", "claude-code", "cli.js"
-            )
-            if os.path.isfile(cli_script):
-                node_exe = os.path.join(cmd_dir, "node.exe")
-                if not os.path.isfile(node_exe):
-                    # Fall back to node on PATH or a known location
-                    node_exe = r"C:\Program Files\nodejs\node.exe"
-                return node_exe, cli_script
-        # Non-Windows or plain "claude" on PATH
-        return executable, ""
-
     def _build_command(self, prompt: str, session_id: Optional[str]) -> list[str]:
-        if self._cli_script:
-            command = [self._node_path, self._cli_script]
-        else:
-            command = [self._executable]
+        command = [self._executable]
         command.extend([
             "--print",
             prompt,
